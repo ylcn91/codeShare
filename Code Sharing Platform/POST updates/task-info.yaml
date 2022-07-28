@@ -1,0 +1,772 @@
+type: edu
+files:
+- name: src/platform/CodeSharingPlatform.java
+  visible: true
+  text: |
+    package platform;
+
+    import org.springframework.boot.SpringApplication;
+    import org.springframework.boot.autoconfigure.SpringBootApplication;
+    import org.springframework.web.bind.annotation.RestController;
+
+    @SpringBootApplication
+    @RestController
+    public class CodeSharingPlatform {
+
+        public static void main(String[] args) {
+            SpringApplication.run(CodeSharingPlatform.class, args);
+        }
+
+    }
+  learner_created: false
+- name: build.gradle
+  visible: true
+  text: |-
+    buildscript {
+        apply plugin: 'hyperskill'
+
+        repositories {
+            mavenCentral()
+        }
+        dependencies {
+            classpath "org.springframework.boot:spring-boot-gradle-plugin:$hs.spring.bootVersion"
+            classpath "io.spring.gradle:dependency-management-plugin:$hs.spring.dependencyManagementVersion"
+        }
+    }
+
+    apply plugin: 'java'
+    apply plugin: 'org.springframework.boot'
+    apply plugin: 'io.spring.dependency-management'
+
+    repositories {
+        mavenCentral()
+    }
+
+    sourceSets.main.resources.srcDirs = ["src/resources"]
+
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter'
+        implementation 'org.springframework.boot:spring-boot-starter-actuator'
+        implementation 'org.springframework.boot:spring-boot-starter-web'
+    }
+  learner_created: false
+- name: src/resources/application.properties
+  visible: true
+  text: |
+    server.port=8889
+    management.endpoints.web.exposure.include=*
+    management.endpoint.shutdown.enabled=true
+  learner_created: false
+- name: test/CodeSharingPlatformTest.java
+  visible: false
+  text: |
+    import org.hyperskill.hstest.dynamic.input.DynamicTesting;
+    import org.hyperskill.hstest.dynamic.input.DynamicTestingMethod;
+    import org.hyperskill.hstest.exception.outcomes.WrongAnswer;
+    import org.hyperskill.hstest.mocks.web.response.HttpResponse;
+    import org.hyperskill.hstest.stage.SpringTest;
+    import org.hyperskill.hstest.testcase.CheckResult;
+    import org.jsoup.Jsoup;
+    import org.jsoup.nodes.Document;
+    import org.jsoup.nodes.Element;
+    import org.jsoup.select.Elements;
+    import platform.CodeSharingPlatform;
+
+    import static org.hyperskill.hstest.testing.expect.Expectation.expect;
+    import static org.hyperskill.hstest.testing.expect.json.JsonChecker.isObject;
+    import static org.hyperskill.hstest.testing.expect.json.JsonChecker.isString;
+
+    public class CodeSharingPlatformTest extends SpringTest {
+        public CodeSharingPlatformTest() {
+            super(CodeSharingPlatform.class);
+        }
+
+        final String API_CODE = "/api/code";
+        final String WEB_CODE = "/code";
+
+        final String API_CODE_NEW = "/api/code/new";
+        final String WEB_CODE_NEW = "/code/new";
+
+        final String[] SNIPPETS = {
+            "public static void ...",
+            "class Code { ..."
+        };
+
+        static void checkStatusCode(HttpResponse resp, int status) {
+            if (resp.getStatusCode() != status) {
+                throw new WrongAnswer(
+                    resp.getRequest().getMethod() + " " +
+                        resp.getRequest().getLocalUri() +
+                        " should respond with status code " + status + ", " +
+                        "responded: " + resp.getStatusCode() + "\n\n" +
+                        "Response body:\n\n" + resp.getContent()
+                );
+            }
+        }
+
+        static void checkTitle(Document doc, String url, String title) {
+            if (!doc.title().equals(title)) {
+                throw new WrongAnswer("GET " + url +
+                    " should contain title \"" + title + "\"");
+            }
+        }
+
+        static Element checkSingleTag(Document doc, String url, String tag) {
+            Elements elems = checkElemsByTag(doc, url, tag, 1);
+            return elems.get(0);
+        }
+
+        static Elements checkElemsByTag(Document doc, String url, String tag, int length) {
+            Elements elems = doc.getElementsByTag(tag);
+            if (elems.size() != length) {
+                throw new WrongAnswer("GET " + url +
+                    " should contain " + length + " <" + tag + "> " +
+                    "element"+ (length == 1 ? "" : "s") +", found: " + elems.size());
+            }
+            return elems;
+        }
+
+        static Element getById(Document doc, String url, String id, String tag) {
+            Element elem = doc.getElementById(id);
+
+            if (elem == null) {
+                throw new WrongAnswer("GET " + url +
+                    " should contain an element with id \"" + id + "\", no one found");
+            }
+
+            if (!elem.tagName().equals(tag)) {
+                throw new WrongAnswer("GET " + url +
+                    " should contain an element with id  \"" + id + "\" and tag \"" + tag + "\", " +
+                    "found another tag: \"" + elem.tagName() + "\"");
+            }
+
+            return elem;
+        }
+
+        @DynamicTestingMethod
+        public DynamicTesting[] dt = new DynamicTesting[] {
+            this::getApiCode,
+            this::checkApiCode,
+            this::checkWebCode,
+            this::checkWebCodeNew,
+
+            () -> postSnippet(SNIPPETS[0]),
+            this::getApiCode,
+            this::checkApiCode,
+            this::checkWebCode,
+
+            () -> postSnippet(SNIPPETS[1]),
+            this::getApiCode,
+            this::checkApiCode,
+            this::checkWebCode,
+        };
+
+
+        String apiSnippetCode;
+        String apiSnippetDate;
+
+        private CheckResult getApiCode() {
+            HttpResponse resp = get(API_CODE).send();
+            checkStatusCode(resp, 200);
+
+            expect(resp.getContent()).asJson().check(
+                isObject()
+                    .value("code", isString(value -> {
+                        if (apiSnippetCode == null) {
+                            apiSnippetCode = value;
+                            return true;
+                        }
+                        return apiSnippetCode.equals(value);
+                    }))
+                    .value("date", isString(value -> {
+                        apiSnippetDate = value;
+                        return true;
+                    }))
+            );
+
+            return CheckResult.correct();
+        }
+
+        private CheckResult checkApiCode() {
+            HttpResponse resp = get(API_CODE).send();
+            checkStatusCode(resp, 200);
+
+            expect(resp.getContent()).asJson().check(
+                isObject()
+                    .value("code", isString(value -> apiSnippetCode.equals(value)))
+                    .value("date", isString(value -> apiSnippetDate.equals(value)))
+            );
+
+            return CheckResult.correct();
+        }
+
+        private CheckResult checkWebCode() {
+            HttpResponse resp = get(WEB_CODE).send();
+            checkStatusCode(resp, 200);
+
+            String html = resp.getContent();
+            Document doc = Jsoup.parse(html);
+
+            checkTitle(doc, WEB_CODE, "Code");
+
+            Element pre = getById(doc, WEB_CODE, "code_snippet", "pre");
+            String webSnippetCode = pre.text();
+            if (!webSnippetCode.trim().equals(apiSnippetCode.trim())) {
+                return CheckResult.wrong("Web code snippet " +
+                    "and api code snippet are different");
+            }
+
+            Element date = getById(doc, WEB_CODE, "load_date", "span");
+            String webSnippetDate = date.text();
+            if (!webSnippetDate.trim().equals(apiSnippetDate.trim())) {
+                return CheckResult.wrong("Web snippet date " +
+                    "and api snippet date are different");
+            }
+
+            return CheckResult.correct();
+        }
+
+        private CheckResult checkWebCodeNew() {
+            HttpResponse resp = get(WEB_CODE_NEW).send();
+            checkStatusCode(resp, 200);
+
+            String html = resp.getContent();
+            Document doc = Jsoup.parse(html);
+
+            checkTitle(doc, WEB_CODE_NEW, "Create");
+
+            getById(doc, WEB_CODE_NEW, "code_snippet", "textarea");
+            getById(doc, WEB_CODE_NEW, "send_snippet", "button");
+
+            return CheckResult.correct();
+        }
+
+        private CheckResult postSnippet(String snippet) {
+            HttpResponse resp = post(API_CODE_NEW, "{\"code\":\"" + snippet + "\"}").send();
+            checkStatusCode(resp, 200);
+
+            expect(resp.getContent()).asJson().check(isObject());
+            apiSnippetCode = snippet;
+            return CheckResult.correct();
+        }
+    }
+  learner_created: false
+- name: src/resources/templates/latestCodes.html
+  visible: true
+  text: |-
+    <!DOCTYPE html>
+
+    <html xmlns:th="http://www.thymeleaf.org">
+
+    <head>
+
+        <link rel="stylesheet"
+              href="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@10.2.1/build/styles/default.min.css">
+        <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@10.2.1/build/highlight.min.js"></script>
+        <script>hljs.initHighlightingOnLoad();</script>
+
+
+        <meta charset="utf-8"/>
+        <title>Latest</title>
+
+    </head>
+
+    <body>
+
+    <div th:each="code : ${latestCodes}">
+        <span id="load_date" th:text="${code.date}"></span>
+        <pre id="code_snippet"><code th:text="${code.code}"></code></pre>
+    </div>
+
+    </body>
+    </html>
+  learner_created: true
+- name: src/platform/controller/ViewController.java
+  visible: true
+  text: |
+    package platform.controller;
+
+    import org.springframework.http.MediaType;
+    import org.springframework.stereotype.Controller;
+    import org.springframework.ui.Model;
+    import org.springframework.web.bind.annotation.GetMapping;
+    import org.springframework.web.bind.annotation.PathVariable;
+    import org.springframework.web.bind.annotation.RequestMapping;
+    import org.springframework.web.bind.annotation.ResponseBody;
+    import platform.services.CodeService;
+
+    @Controller
+    @RequestMapping(path = "/code")
+    public class ViewController {
+        private CodeService storage;
+        public ViewController(CodeService storage) {
+            this.storage = storage;
+        }
+
+        @GetMapping(value = "/code", produces = MediaType.TEXT_HTML_VALUE)
+        @ResponseBody
+        public String getHTMLCode() {
+            return "<html>\n<head>\n    <title>Code</title>\n</head>\n<body>\n" +
+                    "    <pre>\npublic static void main(String[] args) {\n" +
+                    "    SpringApplication.run(CodeSharingPlatform.class, args);\n}" +
+                    "</pre>\n" + "</body>\n</html>";
+        }
+
+        @GetMapping(path = "/{id}")
+        public String getCodeById(Model model, @PathVariable("id") String id) {
+            model.addAttribute("singleCode", storage.findByUUID(id));
+            return "singleCode";
+        }
+
+        @GetMapping(path = "/latest")
+        public String getLatestCodes(Model model) {
+            model.addAttribute("latestCodes", storage.getLastTen());
+            return "latestCodes";
+        }
+
+        @GetMapping(path = "/new", produces = MediaType.TEXT_HTML_VALUE)
+        public String newCode() {
+            return "newCode";
+        }
+    }
+  learner_created: true
+- name: src/platform/services/Utils.java
+  visible: true
+  text: |
+    package platform.services;
+
+    import java.text.ParseException;
+    import java.text.SimpleDateFormat;
+    import java.time.LocalDateTime;
+    import java.time.format.DateTimeFormatter;
+    import java.util.UUID;
+
+    public class Utils {
+
+        private static final String DATETIME_FORMAT = "yyy-MM-dd HH:mm:ss.SSS";
+
+        public static String getCurrentDateTime() {
+            LocalDateTime today = LocalDateTime.now();
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern(DATETIME_FORMAT);
+            return today.format(formatter);
+        }
+
+        public static String getNewUUID() {
+            return UUID.randomUUID().toString();
+        }
+
+        public static long getMSecondsFromDate(String date) {
+            SimpleDateFormat f = new SimpleDateFormat(DATETIME_FORMAT);
+            try {
+                return f.parse(date).getTime();
+            } catch (ParseException e) {
+                e.printStackTrace();
+            }
+            return 0;
+        }
+    }
+  learner_created: true
+- name: src/platform/services/CodeService.java
+  visible: true
+  text: |-
+    package platform.services;
+
+    import org.springframework.beans.factory.annotation.Autowired;
+    import org.springframework.stereotype.Service;
+    import platform.exceptions.CodeNotFoundException;
+    import platform.models.Code;
+    import platform.repositories.CodeRepository;
+
+    import java.util.List;
+    import java.util.Optional;
+    import java.util.function.Predicate;
+    import java.util.stream.Collectors;
+
+    import static platform.services.Utils.getMSecondsFromDate;
+
+
+    @Service
+    public class CodeService {
+        private final CodeRepository codeRepository;
+
+        @Autowired
+        public CodeService(CodeRepository codeRepository) {
+            this.codeRepository = codeRepository;
+        }
+
+        private void checkViewLimit(Code code) {
+            System.out.println("Now Checking views count");
+            if (code.getViews() == 0)
+                return;
+
+            code.setViews(code.getViews() - 1);
+
+            if (code.getViews() == 0) {
+                codeRepository.delete(code);
+                System.out.println("Code deleted because of view count is 0 now");
+            }
+
+            else {
+                codeRepository.save(code);
+                System.out.println("Code saved with new views count = " + code.getViews());
+            }
+        }
+
+        private void checkTimeLimit(Code code) {
+            System.out.println("Now Checking lifetime");
+            long lifeTime = code.getTime();
+            if (lifeTime == 0)
+                return;
+
+            if (lifeTime > 0) {
+                long currentSecond = System.currentTimeMillis() / 1000;
+                long createdSecond = getMSecondsFromDate(code.getDate()) / 1000;
+                long leftToLive = (createdSecond + lifeTime) - currentSecond;
+
+                if (leftToLive > 0) {
+                    code.setTime(leftToLive);
+                    codeRepository.save(code);
+                    System.out.println("Code saved with new lifetime = " + leftToLive);
+                } else {
+                    codeRepository.delete(code);
+                    System.out.println("Code Deleted. Out of time");
+                    throw new CodeNotFoundException();
+                }
+            }
+        }
+
+        public Code findByUUID(String uuid) {
+            System.out.println("Looking for code with uuid=" + uuid);
+            Optional<Code> code = codeRepository.findByUuid(uuid);
+            if (code.isPresent()) {
+                Code candidate = code.get();
+                System.out.println("Code Found: " + candidate);
+                checkViewLimit(candidate);
+                checkTimeLimit(candidate);
+                System.out.println("Returning Code: " + candidate);
+                return candidate;
+            }
+            else throw new CodeNotFoundException();
+        }
+
+        public String addCode(Code code) {
+            codeRepository.save(code);
+            return code.getUuid();
+        }
+
+        public List<Code> getLastTen() {
+            List<Code> result = codeRepository.findAllByOrderByDateDesc();
+
+            Predicate<Code> notLimited = code -> ((code.getViews() == 0) && (code.getTime() == 0));
+            return result.stream()
+                    .filter(notLimited)
+                    .limit(10L)
+                    .collect(Collectors.toList());
+        }
+    }
+  learner_created: true
+- name: src/platform/exceptions/CodeNotFoundException.java
+  visible: true
+  text: |
+    package platform.exceptions;
+
+    import org.springframework.http.HttpStatus;
+    import org.springframework.web.bind.annotation.ResponseStatus;
+
+    @ResponseStatus(code = HttpStatus.NOT_FOUND, reason = "Code not found")
+    public class CodeNotFoundException extends RuntimeException {
+    }
+  learner_created: true
+- name: src/resources/templates/singleCode.html
+  visible: true
+  text: |-
+    <!DOCTYPE html>
+
+    <html xmlns:th="http://www.thymeleaf.org">
+
+    <head th:fragment="headerfragment">
+
+        <link rel="stylesheet"
+              href="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@10.2.1/build/styles/default.min.css">
+        <script src="//cdn.jsdelivr.net/gh/highlightjs/cdn-release@10.2.1/build/highlight.min.js"></script>
+        <script>hljs.initHighlightingOnLoad();</script>
+
+        <meta charset="utf-8"/>
+        <title>Code</title>
+
+    </head>
+
+    <body>
+
+    <span id="load_date" th:text="${singleCode.date}"></span>
+    <p>
+        <!-- <span th:if="${singleCode.views}? ${singleCode.views >= 0}"> -->
+        <span th:if="${singleCode.viewRestricted}">
+                <span id="views_restriction" th:text="${singleCode.views}"></span> more views allowed
+        </span>
+    </p>
+    <p>
+        <span th:if="${singleCode.time}? ${singleCode.time >= 0}">
+        The code will be available for <span id="time_restriction" th:text="${singleCode.time}"></span> seconds
+        </span>
+    </p>
+    <pre id="code_snippet"><code th:text="${singleCode.code}"></code></pre>
+
+    </body>
+
+    </html>
+  learner_created: true
+- name: src/platform/controller/ApiController.java
+  visible: true
+  text: |
+    package platform.controller;
+
+    import org.springframework.http.MediaType;
+    import org.springframework.web.bind.annotation.*;
+    import platform.models.Code;
+    import platform.services.CodeService;
+
+    import java.util.List;
+    import java.util.Map;
+
+    @RestController
+    public class ApiController {
+
+        @GetMapping(value = "/code", produces = MediaType.TEXT_HTML_VALUE)
+        @ResponseBody
+        public String getHTMLCode() {
+            return "<html>\n<head>\n    <title>Code</title>\n</head>\n<body>\n" +
+                    "    <pre>\npublic static void main(String[] args) {\n" +
+                    "    SpringApplication.run(CodeSharingPlatform.class, args);\n}" +
+                    "</pre>\n" + "</body>\n</html>";
+        }
+
+        Map<String, String> apiCode = Map.of("code", "public static void main(String[] args) {\n    SpringApplication.run(CodeSharingPlatform.class, args);\n}");
+        @GetMapping("/api/code")
+        Map<String, String> getApiCode(){
+            return apiCode;
+        }
+
+        private final CodeService storage;
+        public ApiController(CodeService storage) {
+            this.storage = storage;
+        }
+
+        @GetMapping("/{id}")
+        public Code get(@PathVariable("id") String id) {
+            return storage.findByUUID(id);
+        }
+
+        @GetMapping(value = "/latest")
+        public List<Code> latest() {
+            return storage.getLastTen();
+        }
+
+        @PostMapping(path = "/new", produces = MediaType.APPLICATION_JSON_VALUE)
+        public String setApiCode(@RequestBody Code newCode) {
+            Code toWrite = new Code(newCode.getCode(), newCode.getTime(), newCode.getViews());
+            String uuid = storage.addCode(toWrite);
+            System.out.println(uuid);
+            return "{ \"id\" : \"" + uuid + "\" }";
+        }
+    }
+  learner_created: true
+- name: src/platform/models/Code.java
+  visible: true
+  text: |
+    package platform.models;
+
+    import javax.persistence.*;
+    import com.fasterxml.jackson.annotation.JsonIgnore;
+    import platform.services.Utils;
+
+    @Entity
+    @Table(name = "code")
+    public class Code {
+
+        @Id
+        @JsonIgnore
+        private String uuid;
+        private String date;
+        private String code;
+        private long time;
+        private int views;
+
+        @JsonIgnore
+        private boolean viewRestricted = false;
+        @JsonIgnore
+        private boolean timeRestricted = false;
+
+        public long getTime() {
+            return time;
+        }
+
+        public void setTime(long time) {
+            this.time = time;
+        }
+
+        public int getViews() {
+            return views;
+        }
+
+        public void setViews(int views) {
+            this.views = views;
+        }
+
+        public String getCode() {
+            return code;
+        }
+
+        public void setCode(String code) {
+            this.code = code;
+        }
+
+        public String getDate() {
+            return date;
+        }
+
+        public void setDate(String date) {
+            this.date = date;
+        }
+
+        public boolean isViewRestricted() {
+            return viewRestricted;
+        }
+
+        public void setViewRestricted(boolean viewRestricted) {
+            this.viewRestricted = viewRestricted;
+        }
+
+        public boolean isTimeRestricted() {
+            return timeRestricted;
+        }
+
+        public void setTimeRestricted(boolean timeRestricted) {
+            this.timeRestricted = timeRestricted;
+        }
+
+        public String getUuid() {
+            return uuid;
+        }
+
+        public Code() {
+
+        }
+
+        public Code(Code code) {
+            this.code = code.code;
+            this.date = code.date;
+            this.uuid = code.uuid;
+            this.time = code.time;
+            this.views = code.views;
+        }
+
+        public Code(String code, long time, int views) {
+            this.code = code;
+            this.time = time;
+            this.views = views;
+            this.uuid = Utils.getNewUUID();
+            this.date = Utils.getCurrentDateTime();
+
+            if (time != 0)
+                this.timeRestricted = true;
+
+            if (views != 0)
+                this.viewRestricted = true;
+        }
+
+        @Override
+        public String toString() {
+            return "Code{" +
+                    "uuid='" + uuid + '\'' +
+                    ", date='" + date + '\'' +
+                    ", code='" + code + '\'' +
+                    ", time=" + time +
+                    ", views=" + views +
+                    ", viewRestricted=" + viewRestricted +
+                    ", timeRestricted=" + timeRestricted +
+                    '}';
+        }
+    }
+  learner_created: true
+- name: src/platform/repositories/CodeRepository.java
+  visible: true
+  text: |
+    package platform.repositories;
+
+    import org.springframework.data.repository.CrudRepository;
+    import platform.models.Code;
+
+
+    import javax.transaction.Transactional;
+    import java.util.List;
+    import java.util.Optional;
+
+    public interface CodeRepository extends CrudRepository<Code, Integer> {
+
+        @Transactional
+        List<Code> findAllByOrderByDateDesc();
+
+        @Transactional
+        Optional<Code> findByUuid(String id);
+    }
+  learner_created: true
+- name: src/resources/templates/new-code.html
+  visible: true
+  text: |-
+    <!DOCTYPE html>
+
+    <html xmlns:th="http://www.thymeleaf.org">
+    <head>
+        <meta charset="utf-8"/>
+        <title>Create</title>
+    </head>
+
+    <body>
+
+    <textarea id="code_snippet">...</textarea>
+    <br>
+    Time restriction<input id="time_restriction" type="text"/>
+    <br>
+    View restriction<input id="views_restriction" type="text"/>
+    <br>
+    <button id="send_snippet" type="submit" onclick="send()">Submit</button>
+
+    <script type="text/javascript">
+            function send() {
+                let object = {
+                    "code": document.getElementById("code_snippet").value,
+                    "time": document.getElementById("time_restriction").value,
+                    "views": document.getElementById("views_restriction").value
+                };
+
+                let json = JSON.stringify(object);
+
+                let xhr = new XMLHttpRequest();
+                xhr.open("POST", '/api/code/new', false)
+                xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
+                xhr.send(json);
+
+                if (xhr.status === 200) {
+                    alert("Success!");
+                }
+            }
+        </script>
+    </body>
+    </html>
+  learner_created: true
+- name: src/platform/business/Codes.java
+  visible: true
+  learner_created: true
+- name: src/platform/presentation/CodeController.java
+  visible: true
+  learner_created: true
+- name: src/platform/business/EmptyJsonBody.java
+  visible: true
+  learner_created: true
+feedback_link: https://hyperskill.org/projects/130/stages/693/implement#comment
+status: Solved
+feedback:
+  message: Congratulations!
+  time: Thu, 28 Jul 2022 14:11:57 UTC
+record: 2
